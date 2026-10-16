@@ -1,0 +1,97 @@
+{
+  "goblin": {
+    "name": "Goblin",
+    "armor_class": 15,
+    "hit_points": 7,
+    "ability_scores": {
+      "strength": 8,
+      "dexterity": 14,
+      "constitution": 10,
+      "intelligence": 10,
+      "wisdom": 8,
+      "charisma": 8
+    },
+    "proficiency_bonus": 2,
+    "weapon": "scimitar",
+    "proficient_weapons": ["scimitar"],
+    "resistances": [],
+    "vulnerabilities": [],
+    "immunities": []
+  },
+  "orc": {
+    "name": "Orc",
+    "armor_class": 13,
+    "hit_points": 15,
+    "ability_scores": {
+      "strength": 16,
+      "dexterity": 12,
+      "constitution": 16,
+      "intelligence": 7,
+      "wisdom": 11,
+      "charisma": 10
+    },
+    "proficiency_bonus": 2,
+    "weapon": "greataxe",
+    "proficient_weapons": ["greataxe"],
+    "resistances": [],
+    "vulnerabilities": [],
+    "immunities": []
+  },
+  "skeleton": {
+    "name": "Skeleton",
+    "armor_class": 13,
+    "hit_points": 13,
+    "ability_scores": {
+      "strength": 10,
+      "dexterity": 14,
+      "constitution": 15,
+      "intelligence": 6,
+      "wisdom": 8,
+      "charisma": 5
+    },
+    "proficiency_bonus": 2,
+    "weapon": "shortbow",
+    "proficient_weapons": ["shortbow"],
+    "resistances": [],
+    "vulnerabilities": ["bludgeoning"],
+    "immunities": ["poison"]
+  },
+  "wolf": {
+    "name": "Wolf",
+    "armor_class": 13,
+    "hit_points": 11,
+    "ability_scores": {
+      "strength": 12,
+      "dexterity": 15,
+      "constitution": 12,
+      "intelligence": 3,
+      "wisdom": 12,
+      "charisma": 6
+    },
+    "proficiency_bonus": 2,
+    "weapon": "bite",
+    "proficient_weapons": ["bite"],
+    "resistances": [],
+    "vulnerabilities": [],
+    "immunities": []
+  },
+  "ogre": {
+    "name": "Ogre",
+    "armor_class": 11,
+    "hit_points": 59,
+    "ability_scores": {
+      "strength": 19,
+      "dexterity": 8,
+      "constitution": 16,
+      "intelligence": 5,
+      "wisdom": 7,
+      "charisma": 7
+    },
+    "proficiency_bonus": 2,
+    "weapon": "greatclub",
+    "proficient_weapons": ["greatclub"],
+    "resistances": [],
+    "vulnerabilities": [],
+    "immunities": []
+  }
+}

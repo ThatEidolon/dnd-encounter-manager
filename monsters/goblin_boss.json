@@ -1,0 +1,19 @@
+{
+  "name": "Goblin Boss",
+  "armor_class": 17,
+  "hit_points": 21,
+  "ability_scores": {
+    "strength": 10,
+    "dexterity": 14,
+    "constitution": 10,
+    "intelligence": 10,
+    "wisdom": 8,
+    "charisma": 10
+  },
+  "proficiency_bonus": 2,
+  "weapon": "scimitar",
+  "proficient_weapons": ["scimitar"],
+  "resistances": [],
+  "vulnerabilities": [],
+  "immunities": []
+}

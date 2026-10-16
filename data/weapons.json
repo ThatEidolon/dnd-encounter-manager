@@ -1,0 +1,21 @@
+{
+  "sword": { "damage_dice": "1d8", "damage_type": "slashing", "ability": "strength" },
+  "longsword": { "damage_dice": "1d8", "damage_type": "slashing", "ability": "strength" },
+  "shortsword": { "damage_dice": "1d6", "damage_type": "piercing", "ability": "dexterity" },
+  "axe": { "damage_dice": "1d8", "damage_type": "slashing", "ability": "strength" },
+  "greataxe": { "damage_dice": "1d12", "damage_type": "slashing", "ability": "strength" },
+  "greatclub": { "damage_dice": "2d8", "damage_type": "bludgeoning", "ability": "strength" },
+  "bow": { "damage_dice": "1d6", "damage_type": "piercing", "ability": "dexterity" },
+  "longbow": { "damage_dice": "1d8", "damage_type": "piercing", "ability": "dexterity" },
+  "shortbow": { "damage_dice": "1d6", "damage_type": "piercing", "ability": "dexterity" },
+  "light crossbow": { "damage_dice": "1d8", "damage_type": "piercing", "ability": "dexterity" },
+  "dagger": { "damage_dice": "1d4", "damage_type": "piercing", "ability": "dexterity" },
+  "mace": { "damage_dice": "1d6", "damage_type": "bludgeoning", "ability": "strength" },
+  "quarterstaff": { "damage_dice": "1d6", "damage_type": "bludgeoning", "ability": "strength" },
+  "rapier": { "damage_dice": "1d8", "damage_type": "piercing", "ability": "dexterity" },
+  "scimitar": { "damage_dice": "1d6", "damage_type": "slashing", "ability": "dexterity" },
+  "bite": { "damage_dice": "2d4", "damage_type": "piercing", "ability": "strength" },
+  "unarmed": { "damage_dice": "1d4", "damage_type": "bludgeoning", "ability": "strength" },
+  "warhammer": { "damage_dice": "1d8", "damage_type": "bludgeoning", "ability": "strength" },
+  "handaxe": { "damage_dice": "1d6", "damage_type": "slashing", "ability": "strength" }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Elara",
+  "class_type": "wizard",
+  "level": 1,
+  "armor_class": 11,
+  "hit_points": 8,
+  "ability_scores": {
+    "strength": 8,
+    "dexterity": 13,
+    "constitution": 14,
+    "intelligence": 16,
+    "wisdom": 12,
+    "charisma": 10
+  },
+  "wielded_weapon": "quarterstaff",
+  "proficient_weapons": ["quarterstaff"],
+  "saving_throw_proficiencies": ["intelligence", "wisdom"]
+}
