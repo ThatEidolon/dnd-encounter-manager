@@ -1,10 +1,22 @@
 # D&D Encounter Manager & Combat Assistant
 
-A modular combat runner and assistant designed for Dungeon Masters running local D&D 5e tabletop club sessions.
+A modular combat runner and assistant for local D&D 5e tabletop sessions.
+
+This is also a tutorial project for learning Python. Start with the
+[Learning Guide](LEARNING_GUIDE.md), which explains the files, follows an
+attack through the program, and links each technique to W3Schools and the
+official Python documentation. Continue with the
+[Python Deep Dive](PYTHON_DEEP_DIVE.md) for decorators, classes, type hints,
+dunder methods, regex, file operations, imports, and a complete testing lesson.
 
 Run `main.py` to launch the interactive DM console. You can load characters from JSON sheets or class presets, spawn monsters from templates, track initiative and rounds, apply damage and healing, manage conditions and death saves, and persist encounter sessions.
 
 ## Project Structure
+
+The two tutorial documents are:
+
+- `LEARNING_GUIDE.md` - beginner reading path and core Python concepts
+- `PYTHON_DEEP_DIVE.md` - detailed language reference and testing tutorial
 
 - `main.py` — public entry point and CLI runner
 - `encounter.py` — round/turn manager, initiative tracking, and live interactive DM REPL

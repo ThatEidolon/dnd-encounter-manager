@@ -1,6 +1,9 @@
-"""Public entry point for the D&D combat system and DM encounter console."""
+"""Start the D&D encounter manager and expose its public tools.
 
-from pathlib import Path
+This module is the program's entry point.  Running ``python main.py`` calls
+``main()``.  Importing ``main`` gives another Python file access to the names
+listed in ``__all__`` without starting the interactive program.
+"""
 
 from character_defaults import (
     ABILITIES,
@@ -65,22 +68,28 @@ __all__ = [
 
 
 def main() -> None:
+    """Ask the DM to load an encounter or create a new one."""
     print("=== D&D Dungeon Master Assistant ===")
-    saved_files = list(ENCOUNTERS_DIRECTORY.glob("*.json")) if ENCOUNTERS_DIRECTORY.exists() else []
+    saved_files = (
+        list(ENCOUNTERS_DIRECTORY.glob("*.json"))
+        if ENCOUNTERS_DIRECTORY.exists()
+        else []
+    )
     if saved_files:
         print("\nSaved encounters found:")
-        for idx, f in enumerate(saved_files, 1):
-            print(f"  {idx}. {f.name}")
-        choice = input("Start [N]ew encounter or [L]oad saved encounter? [N/l]: ").strip().lower()
+        for number, saved_file in enumerate(saved_files, start=1):
+            print(f"  {number}. {saved_file.name}")
+        choice = input(
+            "Start [N]ew encounter or [L]oad saved encounter? [N/l]: "
+        ).strip().lower()
         if choice == "l":
             pick = input("Enter file number or filename: ").strip()
-            path = None
             if pick.isdigit() and 1 <= int(pick) <= len(saved_files):
                 path = saved_files[int(pick) - 1]
             else:
                 target = pick if pick.endswith(".json") else f"{pick}.json"
                 path = ENCOUNTERS_DIRECTORY / target
-            if path and path.exists():
+            if path.exists():
                 encounter = Encounter.load(path)
                 print(f"Loaded {path.name}!")
                 run_encounter_console(encounter)

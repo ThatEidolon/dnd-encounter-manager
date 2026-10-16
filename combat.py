@@ -1,4 +1,9 @@
-"""Dice rolling and D&D 5e-style weapon attack resolution."""
+"""Roll dice and resolve D&D 5e-style attacks and saving throws.
+
+Most functions accept a ``roller`` argument.  The real game uses Python's
+random-number generator, while tests provide predictable rolls.  This pattern
+is called dependency injection.
+"""
 
 from __future__ import annotations
 
@@ -10,20 +15,38 @@ from models import AttackResult, Combatant, Weapon
 
 
 class Roller(Protocol):
-    def randint(self, start: int, end: int) -> int: ...
+    """Describe any object capable of producing a random integer."""
+
+    def randint(self, start: int, end: int) -> int:
+        """Return an integer between ``start`` and ``end``."""
+        ...
+
+
+class _RandomRoller:
+    """Adapt Python's random module to the small ``Roller`` interface."""
+
+    def __init__(self) -> None:
+        self._generator = random.Random()
+
+    def randint(self, start: int, end: int) -> int:
+        """Return a random integer between the two endpoints."""
+        return self._generator.randint(start, end)
 
 
 _DICE_PATTERN = re.compile(r"^(\d*)d(\d+)$", re.IGNORECASE)
 _EXPR_PATTERN = re.compile(r"^(\d*)d(\d+)(?:\s*([+-])\s*(\d+))?$", re.IGNORECASE)
+DEFAULT_ROLLER: Roller = _RandomRoller()
 
 
 def ability_modifier(score: int) -> int:
+    """Convert an ability score into its D&D ability modifier."""
     if not 1 <= score <= 30:
         raise ValueError("An ability score must be between 1 and 30")
     return (score - 10) // 2
 
 
-def roll_dice(expression: str, roller: Roller = random) -> tuple[int, ...]:
+def roll_dice(expression: str, roller: Roller = DEFAULT_ROLLER) -> tuple[int, ...]:
+    """Roll a simple expression such as ``d20`` or ``2d6``."""
     match = _DICE_PATTERN.fullmatch(expression.strip())
     if not match:
         raise ValueError(f"Invalid dice expression: {expression!r}")
@@ -35,8 +58,11 @@ def roll_dice(expression: str, roller: Roller = random) -> tuple[int, ...]:
     return tuple(roller.randint(1, sides) for _ in range(count))
 
 
-def roll_expression(expression: str, roller: Roller = random) -> tuple[tuple[int, ...], int]:
-    """Roll a dice expression with an optional modifier (e.g. '2d6+3', '1d20-1', 'd8')."""
+def roll_expression(
+        expression: str,
+        roller: Roller = DEFAULT_ROLLER,
+) -> tuple[tuple[int, ...], int]:
+    """Roll dice plus an optional modifier, such as ``2d6+3``."""
     match = _EXPR_PATTERN.fullmatch(expression.strip())
     if not match:
         raise ValueError(f"Invalid dice expression: {expression!r}")
@@ -53,12 +79,13 @@ def roll_expression(expression: str, roller: Roller = random) -> tuple[tuple[int
 
 
 def _roll_d20(
-    roller: Roller = random,
-    *,
-    advantage: bool = False,
-    disadvantage: bool = False,
-    manual_roll: int | None = None,
+        roller: Roller = DEFAULT_ROLLER,
+        *,
+        advantage: bool = False,
+        disadvantage: bool = False,
+        manual_roll: int | None = None,
 ) -> tuple[tuple[int, ...], int]:
+    """Roll a d20, applying advantage, disadvantage, or a manual roll."""
     if manual_roll is not None:
         return (manual_roll,), manual_roll
     if advantage == disadvantage:
@@ -69,14 +96,15 @@ def _roll_d20(
 
 
 def calculate_damage(
-    weapon: Weapon,
-    ability_mod: int,
-    *,
-    critical: bool = False,
-    damage_bonus: int = 0,
-    roller: Roller = random,
-    manual_rolls: tuple[int, ...] | None = None,
+        weapon: Weapon,
+        ability_mod: int,
+        *,
+        critical: bool = False,
+        damage_bonus: int = 0,
+        roller: Roller = DEFAULT_ROLLER,
+        manual_rolls: tuple[int, ...] | None = None,
 ) -> tuple[tuple[int, ...], int]:
+    """Roll a weapon's damage dice and add its flat modifiers."""
     if manual_rolls is not None:
         rolls = manual_rolls
     else:
@@ -92,32 +120,40 @@ def calculate_damage(
 
 
 def attack(
-    attacker: Combatant,
-    target: Combatant,
-    weapon: Weapon | None = None,
-    *,
-    advantage: bool = False,
-    disadvantage: bool = False,
-    attack_bonus: int = 0,
-    damage_bonus: int = 0,
-    roller: Roller = random,
-    manual_d20: int | None = None,
-    manual_damage_rolls: tuple[int, ...] | None = None,
-    is_melee: bool = True,
+        attacker: Combatant,
+        target: Combatant,
+        weapon: Weapon | None = None,
+        *,
+        advantage: bool = False,
+        disadvantage: bool = False,
+        attack_bonus: int = 0,
+        damage_bonus: int = 0,
+        roller: Roller = DEFAULT_ROLLER,
+        manual_d20: int | None = None,
+        manual_damage_rolls: tuple[int, ...] | None = None,
+        is_melee: bool = True,
 ) -> AttackResult:
+    """Resolve one attack, change the target's HP, and return the details."""
     weapon = weapon or attacker.wielded_weapon
     if weapon is None:
         raise ValueError(
             f"{attacker.name} has no wielded weapon; equip one or pass a weapon to attack()"
         )
 
-    # Factor in 5e condition modifiers
+    # Conditions can add advantage or disadvantage to the attack roll.
     effective_adv = advantage
     effective_dis = disadvantage
 
     if "blinded" in attacker.conditions or "poisoned" in attacker.conditions:
         effective_dis = True
-    if any(c in target.conditions for c in ("blinded", "restrained", "stunned", "paralyzed", "unconscious")):
+    advantage_conditions = {
+        "blinded",
+        "restrained",
+        "stunned",
+        "paralyzed",
+        "unconscious",
+    }
+    if target.conditions.intersection(advantage_conditions):
         effective_adv = True
     if "prone" in target.conditions:
         if is_melee and not weapon.is_ranged:
@@ -144,8 +180,14 @@ def attack(
     critical = natural_roll == 20
     hit = natural_roll != 1 and (critical or attack_total >= target.armor_class)
 
-    # 5e rule: Any attack that hits an unconscious/paralyzed creature within 5ft is an automatic critical
-    if hit and (is_melee and not weapon.is_ranged) and any(c in target.conditions for c in ("unconscious", "paralyzed")):
+    # A nearby hit against an unconscious or paralyzed target is critical.
+    helpless_conditions = {"unconscious", "paralyzed"}
+    if (
+            hit
+            and is_melee
+            and not weapon.is_ranged
+            and target.conditions.intersection(helpless_conditions)
+    ):
         critical = True
 
     damage_rolls: tuple[int, ...] = ()
@@ -181,16 +223,16 @@ def attack(
 
 
 def make_saving_throw(
-    combatant: Combatant,
-    ability: str,
-    dc: int,
-    *,
-    advantage: bool = False,
-    disadvantage: bool = False,
-    roller: Roller = random,
-    manual_roll: int | None = None,
+        combatant: Combatant,
+        ability: str,
+        dc: int,
+        *,
+        advantage: bool = False,
+        disadvantage: bool = False,
+        roller: Roller = DEFAULT_ROLLER,
+        manual_roll: int | None = None,
 ) -> tuple[bool, int, int]:
-    """Roll an ability saving throw against a DC. Returns (passed, total, natural_roll)."""
+    """Roll a saving throw and return passed, total, and natural roll."""
     ability_key = ability.lower().strip()
     ability_mod = combatant.modifier(ability_key)
     prof = (

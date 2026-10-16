@@ -1,50 +1,112 @@
-"""Interactive encounter management, initiative tracking, and live DM console."""
+"""Manage initiative, turns, saved encounters, and the live DM console.
+
+``Encounter`` contains the state and small operations for a battle.  The
+``run_encounter_console`` function is the user interface that translates text
+commands into those operations.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-import random
 from typing import Any, Callable
 
-from combat import Roller, attack, make_saving_throw, roll_expression
+from combat import (
+    DEFAULT_ROLLER,
+    Roller,
+    attack,
+    make_saving_throw,
+    roll_expression,
+)
 from models import Combatant
 from monster_defaults import create_monster, get_available_monsters
-
 
 ENCOUNTERS_DIRECTORY = Path(__file__).parent / "encounters"
 
 
+def _find_target(
+        encounter: Encounter,
+        target_name: str,
+        output_func: Callable[[str], None],
+) -> Combatant | None:
+    """Find a target and display a consistent message when it is missing."""
+    target = encounter.find_combatant(target_name)
+    if target is None:
+        output_func(f"Combatant {target_name!r} not found.")
+    return target
+
+
+def _read_manual_d20(
+        encounter: Encounter,
+        combatant: Combatant,
+        input_func: Callable[[str], str],
+) -> int | None:
+    """Read a physical d20 result when the encounter uses manual mode."""
+    if encounter.roll_mode != "manual":
+        return None
+    value = input_func(
+        f"Enter physical d20 roll for {combatant.name}: "
+    ).strip()
+    return int(value) if value.isdigit() else None
+
+
+def _read_target_and_amount(
+        encounter: Encounter,
+        arguments: list[str],
+        usage: str,
+        output_func: Callable[[str], None],
+) -> tuple[Combatant, int] | None:
+    """Parse a target name and whole-number amount from command arguments."""
+    if len(arguments) < 2:
+        output_func(usage)
+        return None
+
+    amount_text = arguments[-1]
+    target_name = " ".join(arguments[:-1])
+    target = _find_target(encounter, target_name, output_func)
+    if target is None:
+        return None
+    try:
+        amount = int(amount_text)
+    except ValueError:
+        output_func("Amount must be a whole number.")
+        return None
+    return target, amount
+
+
 class Encounter:
-    """Tracks round, turn order, initiative, and combatant state."""
+    """Track round number, turn order, and every combatant in one battle."""
 
     def __init__(
-        self,
-        combatants: list[Combatant] | None = None,
-        *,
-        round_number: int = 1,
-        turn_index: int = 0,
-        roll_mode: str = "auto",
+            self,
+            combatants: list[Combatant] | None = None,
+            *,
+            round_number: int = 1,
+            turn_index: int = 0,
+            roll_mode: str = "auto",
     ) -> None:
         self.combatants: list[Combatant] = combatants or []
         self.round_number: int = round_number
         self.turn_index: int = turn_index
-        self.roll_mode: str = roll_mode  # "auto" or "manual"
-        self.initiative_rolled: bool = any(c.initiative > 0 for c in self.combatants)
+        self.roll_mode: str = roll_mode
+        self.initiative_rolled: bool = any(
+            combatant.initiative > 0 for combatant in self.combatants
+        )
 
     @property
     def active_combatant(self) -> Combatant | None:
+        """Return the combatant whose turn it is, or ``None`` if empty."""
         if not self.combatants:
             return None
         self.turn_index = max(0, min(self.turn_index, len(self.combatants) - 1))
         return self.combatants[self.turn_index]
 
     def roll_initiative(
-        self,
-        roller: Roller = random,
-        manual_rolls: dict[str, int] | None = None,
+            self,
+            roller: Roller = DEFAULT_ROLLER,
+            manual_rolls: dict[str, int] | None = None,
     ) -> None:
-        """Roll initiative for all combatants and sort by (initiative, dex, name)."""
+        """Roll initiative and sort combatants into their turn order."""
         manual_rolls = manual_rolls or {}
         for combatant in self.combatants:
             if combatant.name in manual_rolls:
@@ -57,6 +119,7 @@ class Encounter:
         self.turn_index = 0
 
     def sort_by_initiative(self) -> None:
+        """Sort highest initiative first, using Dexterity and name as ties."""
         self.combatants.sort(
             key=lambda c: (
                 c.initiative,
@@ -67,12 +130,11 @@ class Encounter:
         )
 
     def next_turn(self) -> tuple[Combatant | None, bool]:
-        """Advance to next combatant. Returns (active_combatant, round_advanced)."""
+        """Advance a turn and report whether a new round started."""
         if not self.combatants:
             return None, False
 
         round_advanced = False
-        initial_index = self.turn_index
         attempts = 0
 
         while attempts < len(self.combatants):
@@ -83,7 +145,7 @@ class Encounter:
                 round_advanced = True
 
             active = self.active_combatant
-            # Skip NPCs that are already dead
+            # Dead NPCs stay in the table but do not receive another turn.
             if active and active.combatant_type == "npc" and not active.is_alive:
                 attempts += 1
                 continue
@@ -92,6 +154,7 @@ class Encounter:
         return self.active_combatant, round_advanced
 
     def prev_turn(self) -> Combatant | None:
+        """Move backward one turn and return the newly active combatant."""
         if not self.combatants:
             return None
         self.turn_index -= 1
@@ -102,38 +165,38 @@ class Encounter:
         return self.active_combatant
 
     def find_combatant(self, query: str) -> Combatant | None:
-        """Find a combatant by exact or partial name/index (case-insensitive)."""
-        q = query.strip().lower()
-        if not q:
+        """Find a combatant by list number or a case-insensitive name."""
+        cleaned_query = query.strip().lower()
+        if not cleaned_query:
             return None
-        # Try numeric 1-based index
-        if q.isdigit():
-            idx = int(q) - 1
-            if 0 <= idx < len(self.combatants):
-                return self.combatants[idx]
 
-        # Exact match
-        for c in self.combatants:
-            if c.name.lower() == q:
-                return c
+        # People count from 1, but Python list indexes begin at 0.
+        if cleaned_query.isdigit():
+            index = int(cleaned_query) - 1
+            if 0 <= index < len(self.combatants):
+                return self.combatants[index]
 
-        # Prefix match
-        for c in self.combatants:
-            if c.name.lower().startswith(q):
-                return c
+        for combatant in self.combatants:
+            if combatant.name.lower() == cleaned_query:
+                return combatant
 
-        # Substring match
-        for c in self.combatants:
-            if q in c.name.lower():
-                return c
+        for combatant in self.combatants:
+            if combatant.name.lower().startswith(cleaned_query):
+                return combatant
+
+        for combatant in self.combatants:
+            if cleaned_query in combatant.name.lower():
+                return combatant
         return None
 
     def add_combatant(self, combatant: Combatant) -> None:
+        """Add a combatant and restore initiative order when necessary."""
         self.combatants.append(combatant)
         if self.initiative_rolled:
             self.sort_by_initiative()
 
     def remove_combatant(self, query: str) -> Combatant | None:
+        """Remove and return a matching combatant, if one exists."""
         target = self.find_combatant(query)
         if target:
             idx = self.combatants.index(target)
@@ -145,8 +208,17 @@ class Encounter:
         return target
 
     def check_battle_status(self) -> str | None:
-        players = [c for c in self.combatants if c.combatant_type == "player"]
-        npcs = [c for c in self.combatants if c.combatant_type == "npc"]
+        """Return a victory, defeat, or warning message when appropriate."""
+        players = [
+            combatant
+            for combatant in self.combatants
+            if combatant.combatant_type == "player"
+        ]
+        npcs = [
+            combatant
+            for combatant in self.combatants
+            if combatant.combatant_type == "npc"
+        ]
 
         players_conscious = [c for c in players if c.is_conscious]
         players_alive = [c for c in players if c.is_alive]
@@ -161,44 +233,57 @@ class Encounter:
         return None
 
     def status_table(self) -> str:
+        """Build a multi-line table showing initiative and current health."""
         if not self.combatants:
             return "No combatants in encounter."
 
         lines = [
             f"=== Round {self.round_number} ===",
-            f"{'':3} {'#':<2} {'Init':<5} {'Name':<16} {'Type':<7} {'AC':<4} {'HP':<14} {'Status'}",
+            (
+                f"{'':3} {'#':<2} {'Init':<5} {'Name':<16} "
+                f"{'Type':<7} {'AC':<4} {'HP':<14} {'Status'}"
+            ),
             "-" * 68,
         ]
 
-        for i, c in enumerate(self.combatants, start=1):
-            marker = ">>>" if (self.turn_index == i - 1 and self.initiative_rolled) else "   "
-            hp_text = f"{c.hit_points}/{c.max_hit_points}"
-            if c.temp_hp > 0:
-                hp_text += f" (+{c.temp_hp})"
+        for number, combatant in enumerate(self.combatants, start=1):
+            is_active = (
+                    self.turn_index == number - 1 and self.initiative_rolled
+            )
+            marker = ">>>" if is_active else "   "
+            hp_text = f"{combatant.hit_points}/{combatant.max_hit_points}"
+            if combatant.temp_hp > 0:
+                hp_text += f" (+{combatant.temp_hp})"
 
             status_tags = []
-            if not c.is_alive:
+            if not combatant.is_alive:
                 status_tags.append("[DEAD]")
-            elif not c.is_conscious:
-                if c.combatant_type == "player":
-                    if c.stable:
+            elif not combatant.is_conscious:
+                if combatant.combatant_type == "player":
+                    if combatant.stable:
                         status_tags.append("[STABLE]")
                     else:
-                        status_tags.append(f"[DOWN DS:{c.death_saves_success}S/{c.death_saves_failure}F]")
+                        status_tags.append(
+                            "[DOWN DS:"
+                            f"{combatant.death_saves_success}S/"
+                            f"{combatant.death_saves_failure}F]"
+                        )
                 else:
                     status_tags.append("[UNCONSCIOUS]")
-            for cond in sorted(c.conditions):
-                if cond not in {"dead", "unconscious"}:
-                    status_tags.append(f"[{cond.upper()}]")
+            for condition in sorted(combatant.conditions):
+                if condition not in {"dead", "unconscious"}:
+                    status_tags.append(f"[{condition.upper()}]")
 
             status_str = " ".join(status_tags) if status_tags else "Normal"
             lines.append(
-                f"{marker} {i:<2} {c.initiative:<5} {c.name:<16} {c.combatant_type:<7} "
-                f"{c.armor_class:<4} {hp_text:<14} {status_str}"
+                f"{marker} {number:<2} {combatant.initiative:<5} "
+                f"{combatant.name:<16} {combatant.combatant_type:<7} "
+                f"{combatant.armor_class:<4} {hp_text:<14} {status_str}"
             )
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the encounter state in a JSON-compatible dictionary."""
         return {
             "round_number": self.round_number,
             "turn_index": self.turn_index,
@@ -208,6 +293,7 @@ class Encounter:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Encounter:
+        """Build an encounter from a dictionary loaded from JSON."""
         encounter = cls(
             combatants=[Combatant.from_dict(cd) for cd in data.get("combatants", [])],
             round_number=data.get("round_number", 1),
@@ -217,26 +303,28 @@ class Encounter:
         return encounter
 
     def save(self, filepath: str | Path) -> None:
+        """Save the complete encounter state to a JSON file."""
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2)
+        with path.open("w", encoding="utf-8") as json_file:
+            json.dump(self.to_dict(), json_file, indent=2)
 
     @classmethod
     def load(cls, filepath: str | Path) -> Encounter:
+        """Load an encounter that was previously saved as JSON."""
         path = Path(filepath)
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with path.open("r", encoding="utf-8") as json_file:
+            data = json.load(json_file)
         return cls.from_dict(data)
 
 
 def run_encounter_console(
-    encounter: Encounter,
-    input_func: Callable[[str], str] = input,
-    output_func: Callable[[str], None] = print,
-    roller: Roller = random,
+        encounter: Encounter,
+        input_func: Callable[[str], str] = input,
+        output_func: Callable[[str], None] = print,
+        roller: Roller = DEFAULT_ROLLER,
 ) -> None:
-    """Live interactive DM encounter console and REPL."""
+    """Run the text-command loop used by the Dungeon Master."""
     output_func("\n" + "=" * 50)
     output_func("      DUNGEON MASTER ENCOUNTER MANAGER")
     output_func("=" * 50)
@@ -244,17 +332,22 @@ def run_encounter_console(
     # Initiative setup
     if not encounter.initiative_rolled:
         output_func("\nInitiative has not been rolled yet.")
-        mode_choice = input_func("Roll mode: [A]uto roll all, or [M]anual input? [A/m]: ").strip().lower()
+        mode_choice = input_func(
+            "Roll mode: [A]uto roll all, or [M]anual input? [A/m]: "
+        ).strip().lower()
         if mode_choice == "m":
             encounter.roll_mode = "manual"
             manual_rolls: dict[str, int] = {}
-            for c in encounter.combatants:
-                dex_mod = c.modifier("dexterity")
-                prompt = f"Enter initiative for {c.name} (DEX mod {dex_mod:+d}): "
+            for combatant in encounter.combatants:
+                dex_mod = combatant.modifier("dexterity")
+                prompt = (
+                    f"Enter initiative for {combatant.name} "
+                    f"(DEX mod {dex_mod:+d}): "
+                )
                 while True:
-                    val = input_func(prompt).strip()
+                    value = input_func(prompt).strip()
                     try:
-                        manual_rolls[c.name] = int(val)
+                        manual_rolls[combatant.name] = int(value)
                         break
                     except ValueError:
                         output_func("Please enter an integer.")
@@ -277,9 +370,19 @@ def run_encounter_console(
             output_func("No combatants remaining in encounter.")
             break
 
-        # Check downed status on turn start
-        if not active.is_conscious and active.combatant_type == "player" and active.is_alive and not active.stable:
-            output_func(f"\n[ALERT] {active.name} starts turn UNCONSCIOUS (Death Saves: {active.death_saves_success}S / {active.death_saves_failure}F)")
+        # An unconscious player normally rolls a death save on their turn.
+        needs_death_save = (
+                not active.is_conscious
+                and active.combatant_type == "player"
+                and active.is_alive
+                and not active.stable
+        )
+        if needs_death_save:
+            output_func(
+                f"\n[ALERT] {active.name} starts turn UNCONSCIOUS "
+                f"(Death Saves: {active.death_saves_success}S / "
+                f"{active.death_saves_failure}F)"
+            )
             ds_choice = input_func("Roll death save now? (y/n): ").strip().lower()
             if ds_choice == "y":
                 if encounter.roll_mode == "manual":
@@ -290,7 +393,10 @@ def run_encounter_console(
                 msg = active.record_death_save(roll_val)
                 output_func(f"Death Save: {msg}")
 
-        prompt = f"\n[Round {encounter.round_number} | Turn: {active.name} ({active.hit_points}/{active.max_hit_points} HP)] > "
+        prompt = (
+            f"\n[Round {encounter.round_number} | Turn: {active.name} "
+            f"({active.hit_points}/{active.max_hit_points} HP)] > "
+        )
         try:
             cmd_line = input_func(prompt).strip()
         except (EOFError, KeyboardInterrupt):
@@ -352,13 +458,22 @@ def run_encounter_console(
                 target = encounter.find_combatant(" ".join(clean_args))
 
             if not target:
-                valid_targets = [c for c in encounter.combatants if c != active and c.is_alive]
+                valid_targets = [
+                    combatant
+                    for combatant in encounter.combatants
+                    if combatant != active and combatant.is_alive
+                ]
                 if not valid_targets:
                     output_func("No valid targets available.")
                     continue
                 output_func("Select target:")
-                for i, vt in enumerate(valid_targets, 1):
-                    output_func(f"  {i}. {vt.name} (AC {vt.armor_class}, HP {vt.hit_points}/{vt.max_hit_points})")
+                for number, valid_target in enumerate(valid_targets, start=1):
+                    output_func(
+                        f"  {number}. {valid_target.name} "
+                        f"(AC {valid_target.armor_class}, "
+                        f"HP {valid_target.hit_points}/"
+                        f"{valid_target.max_hit_points})"
+                    )
                 choice = input_func("Target name or number: ").strip()
                 target = encounter.find_combatant(choice)
                 if not target and choice.isdigit():
@@ -371,13 +486,12 @@ def run_encounter_console(
                 continue
 
             manual_d20 = None
-            manual_dmg = None
             if encounter.roll_mode == "manual":
                 val = input_func(f"Enter physical d20 roll for {active.name}: ").strip()
                 if val.isdigit():
                     manual_d20 = int(val)
 
-            res = attack(
+            result = attack(
                 active,
                 target,
                 advantage=adv,
@@ -385,16 +499,31 @@ def run_encounter_console(
                 roller=roller,
                 manual_d20=manual_d20,
             )
-            output_func("\n" + str(res))
+            output_func("\n" + str(result))
 
-            if res.hit and encounter.roll_mode == "manual" and manual_d20 is not None:
-                # Prompt if manual damage is preferred
-                dmg_in = input_func(f"Damage dealt was {res.damage_dealt}. Override damage? (leave blank to keep): ").strip()
-                if dmg_in.isdigit():
-                    override = int(dmg_in)
-                    diff = override - res.damage_dealt
-                    target.hit_points = max(0, min(target.max_hit_points, target.hit_points - diff))
-                    output_func(f"Updated {target.name} HP to {target.hit_points}/{target.max_hit_points}")
+            if (
+                    result.hit
+                    and encounter.roll_mode == "manual"
+                    and manual_d20 is not None
+            ):
+                damage_input = input_func(
+                    f"Damage dealt was {result.damage_dealt}. Override damage? "
+                    "(leave blank to keep): "
+                ).strip()
+                if damage_input.isdigit():
+                    override = int(damage_input)
+                    difference = override - result.damage_dealt
+                    target.hit_points = max(
+                        0,
+                        min(
+                            target.max_hit_points,
+                            target.hit_points - difference,
+                        ),
+                    )
+                    output_func(
+                        f"Updated {target.name} HP to {target.hit_points}/"
+                        f"{target.max_hit_points}"
+                    )
 
         elif cmd in {"d", "dmg", "damage"}:
             if len(args) < 2:
@@ -413,42 +542,38 @@ def run_encounter_console(
                 output_func("Amount must be a whole number.")
                 continue
             dealt = target.take_damage(amt, type_str)
-            output_func(f"{target.name} took {dealt} {type_str} damage (HP: {target.hit_points}/{target.max_hit_points})")
+            output_func(
+                f"{target.name} took {dealt} {type_str} damage "
+                f"(HP: {target.hit_points}/{target.max_hit_points})"
+            )
 
         elif cmd in {"h", "heal"}:
-            if len(args) < 2:
-                output_func("Usage: heal <target> <amount>")
+            parsed = _read_target_and_amount(
+                encounter,
+                args,
+                "Usage: heal <target> <amount>",
+                output_func,
+            )
+            if parsed is None:
                 continue
-            amt_str = args[-1]
-            target_name = " ".join(args[:-1])
-            target = encounter.find_combatant(target_name)
-            if not target:
-                output_func(f"Combatant {target_name!r} not found.")
-                continue
-            try:
-                amt = int(amt_str)
-            except ValueError:
-                output_func("Amount must be a whole number.")
-                continue
-            restored = target.heal(amt)
-            output_func(f"{target.name} healed for {restored} HP (HP: {target.hit_points}/{target.max_hit_points})")
+            target, amount = parsed
+            restored = target.heal(amount)
+            output_func(
+                f"{target.name} healed for {restored} HP "
+                f"(HP: {target.hit_points}/{target.max_hit_points})"
+            )
 
         elif cmd in {"temp"}:
-            if len(args) < 2:
-                output_func("Usage: temp <target> <amount>")
+            parsed = _read_target_and_amount(
+                encounter,
+                args,
+                "Usage: temp <target> <amount>",
+                output_func,
+            )
+            if parsed is None:
                 continue
-            amt_str = args[-1]
-            target_name = " ".join(args[:-1])
-            target = encounter.find_combatant(target_name)
-            if not target:
-                output_func(f"Combatant {target_name!r} not found.")
-                continue
-            try:
-                amt = int(amt_str)
-            except ValueError:
-                output_func("Amount must be a whole number.")
-                continue
-            target.set_temp_hp(amt)
+            target, amount = parsed
+            target.set_temp_hp(amount)
             output_func(f"{target.name} now has {target.temp_hp} temporary HP.")
 
         elif cmd in {"save"}:
@@ -461,20 +586,24 @@ def run_encounter_console(
             dc_val = int(clean[-1])
             ability_name = clean[-2]
             target_name = " ".join(clean[:-2])
-            target = encounter.find_combatant(target_name)
-            if not target:
-                output_func(f"Combatant {target_name!r} not found.")
+            target = _find_target(encounter, target_name, output_func)
+            if target is None:
                 continue
-            manual_roll = None
-            if encounter.roll_mode == "manual":
-                val = input_func(f"Enter physical d20 roll for {target.name}: ").strip()
-                if val.isdigit():
-                    manual_roll = int(val)
+            manual_roll = _read_manual_d20(encounter, target, input_func)
             passed, total, nat = make_saving_throw(
-                target, ability_name, dc_val, advantage=adv, disadvantage=dis, roller=roller, manual_roll=manual_roll
+                target,
+                ability_name,
+                dc_val,
+                advantage=adv,
+                disadvantage=dis,
+                roller=roller,
+                manual_roll=manual_roll,
             )
             result_str = "SUCCESS" if passed else "FAILURE"
-            output_func(f"{target.name} {ability_name.upper()} Save: d20 ({nat}) = {total} vs DC {dc_val} -> {result_str}")
+            output_func(
+                f"{target.name} {ability_name.upper()} Save: d20 ({nat}) "
+                f"= {total} vs DC {dc_val} -> {result_str}"
+            )
 
         elif cmd in {"cond"}:
             if len(args) < 3 or args[0].lower() not in {"add", "rem", "remove"}:
@@ -496,15 +625,10 @@ def run_encounter_console(
 
         elif cmd in {"ds"}:
             target_name = " ".join(args) if args else active.name
-            target = encounter.find_combatant(target_name)
-            if not target:
-                output_func(f"Combatant {target_name!r} not found.")
+            target = _find_target(encounter, target_name, output_func)
+            if target is None:
                 continue
-            manual_roll = None
-            if encounter.roll_mode == "manual":
-                val = input_func(f"Enter physical d20 roll for {target.name}: ").strip()
-                if val.isdigit():
-                    manual_roll = int(val)
+            manual_roll = _read_manual_d20(encounter, target, input_func)
             roll_val = manual_roll if manual_roll is not None else roller.randint(1, 20)
             res = target.record_death_save(roll_val)
             output_func(f"Death Save: {res}")
@@ -519,17 +643,27 @@ def run_encounter_console(
             count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 1
             available = get_available_monsters()
             if m_type not in available:
-                output_func(f"Unknown monster {m_type!r}. Available: {', '.join(sorted(available))}")
+                choices = ", ".join(sorted(available))
+                output_func(
+                    f"Unknown monster {m_type!r}. Available: {choices}"
+                )
                 continue
             for _ in range(count):
-                existing_count = sum(1 for c in encounter.combatants if c.monster_type == m_type)
+                existing_count = sum(
+                    1
+                    for combatant in encounter.combatants
+                    if combatant.monster_type == m_type
+                )
                 disp_name = f"{available[m_type].name} {existing_count + 1}"
                 new_npc = create_monster(m_type, name=disp_name)
                 if encounter.initiative_rolled:
                     dex_mod = new_npc.modifier("dexterity")
                     new_npc.initiative = roller.randint(1, 20) + dex_mod
                 encounter.add_combatant(new_npc)
-                output_func(f"Spawned {disp_name} (Init {new_npc.initiative}, HP {new_npc.hit_points}, AC {new_npc.armor_class})")
+                output_func(
+                    f"Spawned {disp_name} (Init {new_npc.initiative}, "
+                    f"HP {new_npc.hit_points}, AC {new_npc.armor_class})"
+                )
 
         elif cmd in {"remove"}:
             if not args:
@@ -551,8 +685,8 @@ def run_encounter_console(
                 rolls, total = roll_expression(expr, roller=roller)
                 rolls_text = " + ".join(str(r) for r in rolls)
                 output_func(f"Rolled {expr}: [{rolls_text}] = {total}")
-            except Exception as e:
-                output_func(f"Error rolling dice: {e}")
+            except ValueError as error:
+                output_func(f"Error rolling dice: {error}")
 
         elif cmd in {"mode"}:
             if args and args[0].lower() in {"auto", "manual"}:

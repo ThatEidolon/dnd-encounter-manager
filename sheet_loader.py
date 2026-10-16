@@ -1,4 +1,8 @@
-"""Discover and import JSON character-sheet configuration files."""
+"""Find JSON character sheets and turn them into combatants.
+
+Validation near the file boundary produces useful error messages before bad
+data reaches the combat system.
+"""
 
 from __future__ import annotations
 
@@ -9,19 +13,30 @@ from typing import Any
 from character_defaults import ABILITIES, WEAPONS, create_player_character
 from models import Combatant
 
-
 CHARACTER_SHEETS_DIRECTORY = Path(__file__).parent / "character_sheets"
 
 _ALLOWED_FIELDS = {
-    "name", "class_type", "level", "armor_class", "hit_points", "max_hit_points", "temp_hp",
-    "ability_scores", "wielded_weapon", "proficient_weapons",
-    "saving_throw_proficiencies", "resistances", "vulnerabilities", "immunities",
-    "conditions", "initiative",
+    "name",
+    "class_type",
+    "level",
+    "armor_class",
+    "hit_points",
+    "max_hit_points",
+    "temp_hp",
+    "ability_scores",
+    "wielded_weapon",
+    "proficient_weapons",
+    "saving_throw_proficiencies",
+    "resistances",
+    "vulnerabilities",
+    "immunities",
+    "conditions",
+    "initiative",
 }
 
 
 def list_character_sheets(
-    directory: str | Path = CHARACTER_SHEETS_DIRECTORY,
+        directory: str | Path = CHARACTER_SHEETS_DIRECTORY,
 ) -> list[Path]:
     """Return available JSON character sheets in stable name order."""
     sheet_directory = Path(directory)
@@ -31,10 +46,13 @@ def list_character_sheets(
 
 
 def _read_sheet(path: Path) -> dict[str, Any]:
+    """Read and validate the top-level structure of one JSON sheet."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
-        raise ValueError(f"Invalid JSON in character sheet {path.name}: {error}") from error
+        raise ValueError(
+            f"Invalid JSON in character sheet {path.name}: {error}"
+        ) from error
     if not isinstance(data, dict):
         raise ValueError(f"Character sheet {path.name} must contain a JSON object")
 
@@ -68,7 +86,9 @@ def load_character_sheet(path: str | Path) -> Combatant:
         try:
             weapon = WEAPONS[str(weapon_name).lower()]
         except KeyError as error:
-            raise ValueError(f"Unknown weapon {weapon_name!r} in {sheet_path.name}") from error
+            raise ValueError(
+                f"Unknown weapon {weapon_name!r} in {sheet_path.name}"
+            ) from error
 
     character = create_player_character(
         str(data["name"]),
@@ -85,15 +105,23 @@ def load_character_sheet(path: str | Path) -> Combatant:
     if "temp_hp" in data:
         character.temp_hp = int(data["temp_hp"])
     if "conditions" in data and isinstance(data["conditions"], list):
-        character.conditions = {c.lower() for c in data["conditions"]}
+        character.conditions = {
+            condition.lower() for condition in data["conditions"]
+        }
 
     for field_name in (
-        "proficient_weapons", "saving_throw_proficiencies", "resistances",
-        "vulnerabilities", "immunities",
+            "proficient_weapons",
+            "saving_throw_proficiencies",
+            "resistances",
+            "vulnerabilities",
+            "immunities",
     ):
         if field_name in data:
             values = data[field_name]
-            if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+            strings_only = isinstance(values, list) and all(
+                isinstance(item, str) for item in values
+            )
+            if not strings_only:
                 raise ValueError(f"{field_name} must be a JSON list of strings")
             setattr(character, field_name, {item.lower() for item in values})
 
@@ -101,8 +129,8 @@ def load_character_sheet(path: str | Path) -> Combatant:
 
 
 def load_character_sheet_by_name(
-    sheet_name: str,
-    directory: str | Path = CHARACTER_SHEETS_DIRECTORY,
+        sheet_name: str,
+        directory: str | Path = CHARACTER_SHEETS_DIRECTORY,
 ) -> Combatant:
     """Load a sheet by filename or stem without allowing path traversal."""
     requested = sheet_name.strip().lower()
@@ -120,7 +148,7 @@ def load_character_sheet_by_name(
 
 
 def import_character_sheets(
-    directory: str | Path = CHARACTER_SHEETS_DIRECTORY,
+        directory: str | Path = CHARACTER_SHEETS_DIRECTORY,
 ) -> list[Combatant]:
     """Import every character sheet from a directory."""
     return [load_character_sheet(path) for path in list_character_sheets(directory)]

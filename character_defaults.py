@@ -1,4 +1,8 @@
-"""Shared 5e character data and level-one player-class presets loaded from text/JSON files."""
+"""Load shared weapons and player-class presets from JSON files.
+
+Keeping game data in JSON lets a student add content without changing the
+Python rules.  This module turns those plain dictionaries into typed objects.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,6 @@ import json
 from pathlib import Path
 
 from models import CharacterClassDefaults, Combatant, DEFAULT_WEAPON, Weapon
-
 
 ABILITIES = (
     "strength",
@@ -18,8 +21,19 @@ ABILITIES = (
 )
 
 DAMAGE_TYPES = (
-    "acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
-    "piercing", "poison", "psychic", "radiant", "slashing", "thunder",
+    "acid",
+    "bludgeoning",
+    "cold",
+    "fire",
+    "force",
+    "lightning",
+    "necrotic",
+    "piercing",
+    "poison",
+    "psychic",
+    "radiant",
+    "slashing",
+    "thunder",
 )
 
 SKILL_ABILITIES = {
@@ -47,26 +61,30 @@ DATA_DIRECTORY = Path(__file__).parent / "data"
 
 
 def _scores(**scores: int) -> tuple[tuple[str, int], ...]:
+    """Convert keyword scores into the immutable form used by defaults."""
     return tuple(scores.items())
 
 
-def load_weapons_from_file(path: Path = DATA_DIRECTORY / "weapons.json") -> dict[str, Weapon]:
+def load_weapons_from_file(
+        path: Path = DATA_DIRECTORY / "weapons.json",
+) -> dict[str, Weapon]:
+    """Load weapon definitions, or return a small fallback collection."""
     if not path.exists():
         return {
             "shortsword": DEFAULT_WEAPON,
             "sword": Weapon("sword", "1d8", "slashing"),
             "longsword": Weapon("longsword", "1d8", "slashing"),
         }
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    with path.open("r", encoding="utf-8") as json_file:
+        data = json.load(json_file)
     weapons: dict[str, Weapon] = {}
     for name, w_data in data.items():
         key = name.lower()
         if (
-            key == "shortsword"
-            and w_data.get("damage_dice") == DEFAULT_WEAPON.damage_dice
-            and w_data.get("damage_type") == DEFAULT_WEAPON.damage_type
-            and w_data.get("ability", "dexterity") == DEFAULT_WEAPON.ability
+                key == "shortsword"
+                and w_data.get("damage_dice") == DEFAULT_WEAPON.damage_dice
+                and w_data.get("damage_type") == DEFAULT_WEAPON.damage_type
+                and w_data.get("ability", "dexterity") == DEFAULT_WEAPON.ability
         ):
             weapons[key] = DEFAULT_WEAPON
         else:
@@ -81,15 +99,19 @@ def load_weapons_from_file(path: Path = DATA_DIRECTORY / "weapons.json") -> dict
 
 
 def load_classes_from_file(
-    path: Path = DATA_DIRECTORY / "classes.json",
+        path: Path = DATA_DIRECTORY / "classes.json",
 ) -> dict[str, CharacterClassDefaults]:
+    """Load player-class starter presets from a JSON file."""
     if not path.exists():
         return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    with path.open("r", encoding="utf-8") as json_file:
+        data = json.load(json_file)
     classes: dict[str, CharacterClassDefaults] = {}
     for name, c_data in data.items():
-        scores_tuple = tuple((k.lower(), int(v)) for k, v in c_data["ability_scores"].items())
+        scores_tuple = tuple(
+            (ability.lower(), int(score))
+            for ability, score in c_data["ability_scores"].items()
+        )
         classes[name.lower()] = CharacterClassDefaults(
             name=name.lower(),
             hit_die=int(c_data["hit_die"]),
@@ -107,7 +129,6 @@ PLAYER_CLASSES: dict[str, CharacterClassDefaults] = load_classes_from_file()
 
 def reload_character_defaults() -> None:
     """Reload weapons and player classes from disk without restarting Python."""
-    global WEAPONS, PLAYER_CLASSES
     WEAPONS.clear()
     WEAPONS.update(load_weapons_from_file())
     PLAYER_CLASSES.clear()
@@ -115,14 +136,14 @@ def reload_character_defaults() -> None:
 
 
 def create_player_character(
-    name: str,
-    class_type: str,
-    *,
-    ability_scores: dict[str, int] | None = None,
-    armor_class: int | None = None,
-    hit_points: int | None = None,
-    level: int = 1,
-    wielded_weapon: Weapon | None = None,
+        name: str,
+        class_type: str,
+        *,
+        ability_scores: dict[str, int] | None = None,
+        armor_class: int | None = None,
+        hit_points: int | None = None,
+        level: int = 1,
+        wielded_weapon: Weapon | None = None,
 ) -> Combatant:
     """Build a player from a class preset, with optional sheet overrides."""
     class_key = class_type.strip().lower()
@@ -134,7 +155,11 @@ def create_player_character(
             f"Unknown player class {class_type!r}. Choose from: {choices}"
         ) from error
 
-    scores = dict(defaults.ability_scores) if ability_scores is None else ability_scores.copy()
+    scores = (
+        dict(defaults.ability_scores)
+        if ability_scores is None
+        else ability_scores.copy()
+    )
     missing = set(ABILITIES) - scores.keys()
     if missing:
         raise ValueError(f"Missing ability scores: {', '.join(sorted(missing))}")

@@ -1,4 +1,8 @@
-"""Core data models shared by combat, characters, monsters, and loaders."""
+"""Define the objects that store weapons, combatants, and attack results.
+
+The classes in this module mostly store data.  Python's ``@dataclass``
+decorator creates their initializer and helpful display methods automatically.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Weapon:
+    """Describe a weapon and the dice used when it deals damage."""
+
     name: str
     damage_dice: str
     damage_type: str
@@ -15,6 +21,7 @@ class Weapon:
     is_ranged: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a dictionary that can be saved as JSON."""
         return {
             "name": self.name,
             "damage_dice": self.damage_dice,
@@ -25,6 +32,7 @@ class Weapon:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Weapon:
+        """Create a weapon from a dictionary loaded from JSON."""
         return cls(
             name=data["name"],
             damage_dice=data["damage_dice"],
@@ -67,6 +75,13 @@ class MonsterDefaults:
 
 @dataclass
 class Combatant:
+    """Store the changing state of one player character or NPC.
+
+    A ``Combatant`` owns its hit points, equipment, defenses, conditions, and
+    death saves.  Methods such as ``heal`` and ``take_damage`` change that
+    state while keeping the game rules in one place.
+    """
+
     name: str
     armor_class: int
     hit_points: int
@@ -105,10 +120,10 @@ class Combatant:
 
     @classmethod
     def from_player_class(
-        cls,
-        name: str,
-        class_type: str,
-        **overrides: Any,
+            cls,
+            name: str,
+            class_type: str,
+            **overrides: Any,
     ) -> Combatant:
         """Create a level-one player using a class starter preset."""
         from character_defaults import create_player_character
@@ -117,10 +132,10 @@ class Combatant:
 
     @classmethod
     def from_monster(
-        cls,
-        monster_type: str,
-        *,
-        name: str | None = None,
+            cls,
+            monster_type: str,
+            *,
+            name: str | None = None,
     ) -> Combatant:
         """Create an NPC using a monster preset."""
         from monster_defaults import create_monster
@@ -129,15 +144,18 @@ class Combatant:
 
     @property
     def is_conscious(self) -> bool:
+        """Return whether the combatant can currently act."""
         return self.hit_points > 0 and "unconscious" not in self.conditions
 
     @property
     def is_alive(self) -> bool:
+        """Return whether the combatant has not died."""
         if self.combatant_type == "player":
             return self.death_saves_failure < 3 and "dead" not in self.conditions
         return self.hit_points > 0 and "dead" not in self.conditions
 
     def modifier(self, ability: str) -> int:
+        """Return the D&D modifier for one named ability score."""
         from combat import ability_modifier
 
         try:
@@ -147,7 +165,7 @@ class Combatant:
         return ability_modifier(score)
 
     def heal(self, amount: int) -> int:
-        """Restore hit points up to max_hit_points. Wakes up unconscious combatants."""
+        """Restore hit points and return the amount actually restored."""
         if amount <= 0 or not self.is_alive:
             return 0
         if self.hit_points == 0:
@@ -160,19 +178,19 @@ class Combatant:
         return self.hit_points - previous
 
     def set_temp_hp(self, amount: int) -> int:
-        """Apply temporary HP according to 5e rules (does not stack, takes highest)."""
+        """Keep the higher of the old and new temporary hit point values."""
         amount = max(0, amount)
         self.temp_hp = max(self.temp_hp, amount)
         return self.temp_hp
 
     def take_damage(
-        self,
-        amount: int,
-        damage_type: str = "untyped",
-        *,
-        is_critical: bool = False,
+            self,
+            amount: int,
+            damage_type: str = "untyped",
+            *,
+            is_critical: bool = False,
     ) -> int:
-        """Apply defenses, reduce temp/regular HP, handle 5e death rules, and return damage dealt."""
+        """Apply defenses and damage, then return the adjusted damage amount."""
         damage_type = damage_type.lower()
         if damage_type in self.immunities:
             amount = 0
@@ -188,7 +206,7 @@ class Combatant:
         if amount == 0:
             return 0
 
-        # If already at 0 HP
+        # Damage at 0 HP causes failed death saves for player characters.
         if self.hit_points == 0:
             if self.combatant_type == "player" and self.is_alive:
                 fails = 2 if is_critical else 1
@@ -199,7 +217,7 @@ class Combatant:
                     self.conditions.add("dead")
             return amount
 
-        # Absorb damage through temporary hit points first
+        # Temporary hit points form a shield in front of regular hit points.
         if self.temp_hp > 0:
             absorbed = min(self.temp_hp, amount)
             self.temp_hp -= absorbed
@@ -262,12 +280,15 @@ class Combatant:
             return f"{self.name} rolled {roll} (failure: {self.death_saves_failure}/3)."
 
     def add_condition(self, condition: str) -> None:
+        """Add a condition after normalizing its spelling to lowercase."""
         self.conditions.add(condition.strip().lower())
 
     def remove_condition(self, condition: str) -> None:
+        """Remove a condition if the combatant currently has it."""
         self.conditions.discard(condition.strip().lower())
 
     def to_dict(self) -> dict[str, Any]:
+        """Return all combatant state in a JSON-compatible dictionary."""
         return {
             "name": self.name,
             "armor_class": self.armor_class,
@@ -296,7 +317,10 @@ class Combatant:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Combatant:
+        """Rebuild a combatant from saved JSON-compatible data."""
         weapon_data = data.get("wielded_weapon")
+        if weapon_data is not None and not isinstance(weapon_data, dict):
+            raise ValueError("wielded_weapon must be a dictionary or null")
         weapon = Weapon.from_dict(weapon_data) if weapon_data else None
         combatant = cls(
             name=data["name"],
@@ -328,6 +352,8 @@ class Combatant:
 
 @dataclass(frozen=True)
 class AttackResult:
+    """Record everything that happened during one attack."""
+
     attacker: Combatant
     target: Combatant
     weapon: str
@@ -345,6 +371,7 @@ class AttackResult:
     target_hit_points: int = 0
 
     def __str__(self) -> str:
+        """Return a sentence suitable for displaying to the DM."""
         roll_text = "/".join(str(roll) for roll in self.d20_rolls)
         if not self.hit:
             return (

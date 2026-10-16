@@ -1,4 +1,9 @@
-import tempfile
+"""Test the combat rules, data loading, and encounter state.
+
+The tests also act as short usage examples.  ``FixedRoller`` replaces random
+dice so each test receives the same rolls every time it runs.
+"""
+
 import unittest
 from pathlib import Path
 
@@ -20,10 +25,13 @@ from main import (
 
 
 class FixedRoller:
+    """Return a prepared sequence of dice rolls for predictable tests."""
+
     def __init__(self, *rolls: int):
         self.rolls = iter(rolls)
 
     def randint(self, start: int, end: int) -> int:
+        """Return the next prepared roll after checking its valid range."""
         roll = next(self.rolls)
         if not start <= roll <= end:
             raise AssertionError(f"Fixed roll {roll} is outside {start}..{end}")
@@ -31,6 +39,7 @@ class FixedRoller:
 
 
 def fighter(*, hp: int = 20, ac: int = 15) -> Combatant:
+    """Create a small fighter fixture shared by several tests."""
     return Combatant(
         name="Fighter",
         armor_class=ac,
@@ -44,7 +53,10 @@ def fighter(*, hp: int = 20, ac: int = 15) -> Combatant:
 
 
 class CombatRulesTests(unittest.TestCase):
+    """Check the important behavior of the combat application."""
+
     def test_monster_factory_applies_goblin_defaults(self):
+        """A Goblin preset should produce its expected combat statistics."""
         goblin = create_monster("goblin")
 
         self.assertEqual(goblin.monster_type, "goblin")
@@ -54,6 +66,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertIn("scimitar", goblin.proficient_weapons)
 
     def test_character_sheet_can_be_discovered_and_loaded(self):
+        """The loader should find and import Liam's JSON sheet."""
         self.assertIn("liam.json", {path.name for path in list_character_sheets()})
 
         liam = load_character_sheet_by_name("liam")
@@ -63,6 +76,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(liam.ability_scores["strength"], 16)
 
     def test_dm_setup_imports_players_and_creates_typed_npcs(self):
+        """Prepared prompt answers should build the requested combat group."""
         answers = iter(["1", "liam", "2", "goblin", "orc"])
         messages: list[str] = []
 
@@ -75,6 +89,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(set(MONSTERS), {"goblin", "orc", "skeleton", "wolf", "ogre"})
 
     def test_directly_created_combatant_gets_a_default_weapon(self):
+        """A basic combatant should receive a shortsword automatically."""
         goblin = Combatant(
             name="Goblin",
             armor_class=15,
@@ -87,6 +102,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(result.weapon, "shortsword")
 
     def test_player_class_factory_applies_level_one_fighter_defaults(self):
+        """The Fighter preset should provide valid level-one defaults."""
         liam = Combatant.from_player_class("Liam", "Fighter")
 
         self.assertEqual(liam.character_class, "fighter")
@@ -99,6 +115,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(liam.saving_throw_proficiencies, {"strength", "constitution"})
 
     def test_attack_uses_the_attackers_wielded_weapon(self):
+        """An omitted weapon argument should use the equipped weapon."""
         attacker = fighter()
         target = fighter()
         target.combatant_type = "npc"
@@ -110,11 +127,13 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(result.weapon, "sword")
 
     def test_ability_modifiers_round_down(self):
+        """Ability modifiers should use floor division as required by 5e."""
         self.assertEqual(ability_modifier(9), -1)
         self.assertEqual(ability_modifier(10), 0)
         self.assertEqual(ability_modifier(16), 3)
 
     def test_natural_one_misses_even_when_total_reaches_ac(self):
+        """A natural one should miss regardless of the attack total."""
         attacker = fighter()
         target = fighter(ac=1)
         result = attack(attacker, target, WEAPONS["sword"], roller=FixedRoller(1))
@@ -123,6 +142,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertIs(result.target, target)
 
     def test_natural_twenty_hits_and_doubles_only_damage_dice(self):
+        """A critical hit should double dice without doubling modifiers."""
         target = fighter(hp=30, ac=30)
         result = attack(
             fighter(), target, WEAPONS["sword"], roller=FixedRoller(20, 4, 5)
@@ -132,6 +152,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(result.damage_dealt, 12)
 
     def test_advantage_uses_higher_d20(self):
+        """Advantage should select the higher of two d20 rolls."""
         result = attack(
             fighter(), fighter(ac=15), WEAPONS["sword"],
             advantage=True, roller=FixedRoller(4, 12, 3),
@@ -140,6 +161,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertTrue(result.hit)
 
     def test_resistance_halves_damage_rounding_down(self):
+        """Resistance should halve incoming damage and round down."""
         target = fighter(hp=20)
         target.resistances.add("slashing")
         result = attack(
@@ -152,6 +174,7 @@ class CombatRulesTests(unittest.TestCase):
     # --- New Tests for Health, Temp HP, Death Saves, Encounter, and Defaults ---
 
     def test_temp_hp_absorbs_damage_first(self):
+        """Temporary hit points should absorb damage before regular HP."""
         hero = fighter(hp=20)
         hero.set_temp_hp(8)
         self.assertEqual(hero.temp_hp, 8)
@@ -166,6 +189,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(hero.hit_points, 17)
 
     def test_heal_caps_at_max_hit_points(self):
+        """Healing should never raise HP above the stored maximum."""
         hero = fighter(hp=20)
         hero.take_damage(10)
         self.assertEqual(hero.hit_points, 10)
@@ -175,14 +199,16 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(hero.hit_points, 20)
 
     def test_player_death_saves_and_recovery(self):
+        """Death saves should track success, failure, and recovery."""
         hero = fighter(hp=10)
         hero.take_damage(10)
         self.assertEqual(hero.hit_points, 0)
         self.assertIn("unconscious", hero.conditions)
 
         # Roll 12: 1 success
-        msg = hero.record_death_save(12)
+        message = hero.record_death_save(12)
         self.assertEqual(hero.death_saves_success, 1)
+        self.assertIn("success", message)
 
         # Roll 4: 1 failure
         hero.record_death_save(4)
@@ -196,6 +222,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(hero.death_saves_failure, 0)
 
     def test_saving_throw_with_proficiency(self):
+        """A proficient saving throw should add the proficiency bonus."""
         hero = fighter()
         hero.saving_throw_proficiencies.add("strength")
         # hero has STR 16 (mod +3) and prof bonus +2 = +5 total
@@ -205,6 +232,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertTrue(passed)
 
     def test_conditions_affect_attacks(self):
+        """A prone defender should grant advantage to a melee attacker."""
         attacker = fighter()
         defender = fighter(ac=15)
         defender.add_condition("prone")
@@ -215,6 +243,7 @@ class CombatRulesTests(unittest.TestCase):
         self.assertTrue(result.hit)
 
     def test_encounter_turn_order_and_rounds(self):
+        """Turn advancement should follow initiative and increment rounds."""
         p1 = fighter(hp=20)
         p1.name = "Hero"
         p1.initiative = 18
@@ -225,17 +254,25 @@ class CombatRulesTests(unittest.TestCase):
         encounter = Encounter([m1, p1])
         encounter.sort_by_initiative()
 
-        self.assertEqual(encounter.active_combatant.name, "Hero")
+        active = encounter.active_combatant
+        self.assertIsNotNone(active)
+        assert active is not None
+        self.assertEqual(active.name, "Hero")
         next_c, advanced = encounter.next_turn()
+        self.assertIsNotNone(next_c)
+        assert next_c is not None
         self.assertEqual(next_c.name, "Goblin 1")
         self.assertFalse(advanced)
 
         next_c, advanced = encounter.next_turn()
+        self.assertIsNotNone(next_c)
+        assert next_c is not None
         self.assertEqual(next_c.name, "Hero")
         self.assertTrue(advanced)
         self.assertEqual(encounter.round_number, 2)
 
     def test_custom_monsters_loaded_from_directory(self):
+        """Custom JSON monsters should join the available presets."""
         available = get_available_monsters()
         self.assertIn("goblin_boss", available)
         boss = create_monster("goblin_boss")
@@ -243,23 +280,27 @@ class CombatRulesTests(unittest.TestCase):
         self.assertEqual(boss.armor_class, 17)
 
     def test_dice_expression_rolling(self):
+        """A dice expression should add its numeric modifier."""
         rolls, total = roll_expression("2d6+3", roller=FixedRoller(4, 5))
         self.assertEqual(rolls, (4, 5))
         self.assertEqual(total, 12)
 
     def test_encounter_save_and_load(self):
+        """Saving and loading should preserve encounter state."""
         p = fighter(hp=18)
         p.name = "Thorin"
         encounter = Encounter([p], round_number=3, turn_index=0)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "test_session.json"
+        path = Path(__file__).parent / "test_session.tmp.json"
+        try:
             encounter.save(path)
 
             loaded = Encounter.load(path)
             self.assertEqual(loaded.round_number, 3)
             self.assertEqual(len(loaded.combatants), 1)
             self.assertEqual(loaded.combatants[0].name, "Thorin")
+        finally:
+            path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
